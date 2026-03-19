@@ -69,7 +69,7 @@ description: 远程 GPU 集群操作。当用户提到集群、远程执行、GP
 
 - **代码编辑在本地**：Coding Agent 原生工具（~0.5ms），远程 MCP 代理文件操作慢 ~2000x
 - **代码同步用团队已有方式**：git push/pull、rsync、共享文件系统等
-- **远程只跑命令**：通过 `remote_bash` 执行训练等 batch 操作
+- **远程只跑命令**：通过 `remote_bash` 执行训练等 bash 操作
 - **读日志/结果在本地**：通过团队已有的同步方式拉到本地，然后用原生 Read 工具读取（比 remote_bash cat 快 ~20x）
 
 ## 核心操作

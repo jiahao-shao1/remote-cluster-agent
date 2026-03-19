@@ -10,7 +10,7 @@ English | [中文](README.zh-CN.md)
 
 Many GPU clusters (private cloud, on-prem HPC, air-gapped environments) have no public internet. Running a full coding agent remotely is either impossible or painfully slow — remote file operations via MCP proxy are ~2000x slower than local ones.
 
-This skill flips the model: **keep all read/write local, only send batch commands to the cluster**.
+This skill flips the model: **keep all read/write local, only send bash commands to the cluster**.
 
 ### Architecture
 
@@ -20,7 +20,7 @@ Local Machine (has internet)              GPU Cluster (no internet)
 ├── Native tools (Read/Edit/Write)            ├── training scripts
 │   ~0.5ms per operation                      ├── checkpoints
 ├── code sync (git/rsync/your way) ────────> pull changes
-├── remote_bash MCP ───sentinel+kill───────> batch commands
+├── remote_bash MCP ───sentinel+kill───────> bash commands
 └── log sync (your way) <──────────────────── training outputs
 ```
 
