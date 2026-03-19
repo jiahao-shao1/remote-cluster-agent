@@ -38,12 +38,10 @@
 
 ## 快速开始
 
-### 1. 将 skill 复制到你的项目
+### 1. 安装 skill
 
 ```bash
-cp -r remote-cluster-agent/ <你的项目>/.agents/skills/remote-cluster-agent/
-# 创建符号链接让 Claude Code 发现它
-ln -s ../../.agents/skills/remote-cluster-agent <你的项目>/.claude/skills/remote-cluster-agent
+npx skills add https://github.com/jiahao-shao1/remote-cluster-agent
 ```
 
 ### 2. 安装 MCP server

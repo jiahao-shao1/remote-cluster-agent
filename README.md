@@ -38,12 +38,10 @@ Edit code (local) → Sync code → Run experiment (remote) → Sync logs → Re
 
 ## Quick Start
 
-### 1. Copy the skill into your project
+### 1. Install the skill
 
 ```bash
-cp -r remote-cluster-agent/ <your-project>/.agents/skills/remote-cluster-agent/
-# Create symlink for Claude Code to discover it
-ln -s ../../.agents/skills/remote-cluster-agent <your-project>/.claude/skills/remote-cluster-agent
+npx skills add https://github.com/jiahao-shao1/remote-cluster-agent
 ```
 
 ### 2. Install the MCP server
