@@ -14,8 +14,11 @@
 
 | 配置项 | 值 |
 |--------|---|
+| 本地项目路径 | `/Users/you/project` |
 | 集群项目路径 | `/home/user/project` |
-| 同步方式 | git push/pull |
+| 文件同步 | Mutagen `cluster-train-files` |
+| 同步模式 | `two-way-safe` |
+| 忽略规则 | 本地 `.gitignore` |
 | 集群无外网 | 是/否 |
 
 ## 共享存储限制
@@ -33,16 +36,14 @@
 | 停止占用脚本 | `scripts/stop_gpu.sh` |
 | 启动占用脚本 | `scripts/start_gpu.sh` |
 
-## 日志/输出同步
-
-通过团队已有的同步方式将集群输出拉到本地，避免用 remote_bash 读大量文件。
+## Mutagen 备注
 
 | 配置项 | 值 |
 |--------|---|
-| 上传脚本（集群执行） | `scripts/sync/upload.sh` |
-| 下载脚本（本地执行） | `scripts/sync/download.sh` |
-| 本地输出目录 | `outputs/` |
-| 默认模式 | light（排除 *.pt, *.bin, *.safetensors, *.pth） |
+| 会话名 | `cluster-train-files` |
+| 远端 endpoint | `gpu-node:2222:/home/user/project` |
+| 重建条件 | `.gitignore` 变更后重新运行 `setup.sh add ...` |
+| 额外说明 | 如需排除 checkpoint / outputs，请写入项目 `.gitignore` |
 
 ## 其他备注
 
