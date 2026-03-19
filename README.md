@@ -16,7 +16,7 @@ This skill flips the model: **keep all read/write local, only send bash commands
 
 ```
 Local Machine (has internet)              GPU Cluster (no internet)
-├── Coding Agent (Claude Code)            └── /path/to/project/
+├── Coding Agent (Claude Code / Codex)    └── /path/to/project/
 ├── Native tools (Read/Edit/Write)            ├── training scripts
 │   ~0.5ms per operation                      ├── checkpoints
 ├── code sync (git/rsync/your way) ────────> pull changes
@@ -40,29 +40,63 @@ Edit code (local) → Sync code → Run experiment (remote) → Sync logs → Re
 
 ### 1. Install the skill
 
+For Claude Code:
+
 ```bash
 npx skills add https://github.com/jiahao-shao1/remote-cluster-agent
 ```
 
-### 2. Install the MCP server
+For Codex:
 
 ```bash
-bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh <name> "<ssh_cmd>" <remote_project_dir>
-
-# Example: register two containers
-bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh train "ssh -p 2222 gpu-node" /home/user/project
-bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh eval  "ssh gpu-eval" /data/project
+mkdir -p ~/.codex/skills
+ln -s /path/to/remote-cluster-agent ~/.codex/skills/remote-cluster-agent
 ```
 
-Prerequisites: [uv](https://docs.astral.sh/uv/), SSH access to cluster, Claude Code installed.
+### 2. Install the MCP server
 
-### 3. Restart Claude Code
+The installer now supports both Claude Code and Codex. It auto-detects the client by default; if both are installed, use `--client` to pick one explicitly.
 
-After installing, restart Claude Code to load the new MCP server. Then just describe what you want to do on the cluster.
+For Claude Code:
+
+```bash
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client claude <name> "<ssh_cmd>" <remote_project_dir>
+
+# Example: register two nodes
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client claude train "ssh -p 2222 gpu-node" /home/user/project
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client claude eval  "ssh gpu-eval" /data/project
+```
+
+For Codex:
+
+```bash
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client codex <name> "<ssh_cmd>" <remote_project_dir>
+
+# Example: register two nodes
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client codex train "ssh -p 2222 gpu-node" /home/user/project
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client codex eval  "ssh gpu-eval" /data/project
+```
+
+Auto-detect example:
+
+```bash
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh train "ssh -p 2222 gpu-node" /home/user/project
+```
+
+Prerequisites: [uv](https://docs.astral.sh/uv/), SSH access to cluster, Claude Code or Codex CLI installed.
+
+### 3. Restart your client
+
+After installing, restart the client you use so it reloads the new MCP server:
+
+- Claude Code: restart Claude Code
+- Codex: restart the Codex CLI session
+
+Then just describe what you want to do on the cluster.
 
 ### 4. First-time interactive setup
 
-On first use, Claude will ask you a few questions (SSH endpoints, paths, sync methods, safety rules) and generate your personal `reference/context.local.md`. This file is gitignored — your config stays private.
+On first use, your agent will ask you a few questions (SSH endpoints, paths, sync methods, safety rules) and generate your personal `reference/context.local.md`. This file is gitignored — your config stays private.
 
 ## File Structure
 
@@ -78,14 +112,14 @@ remote-cluster-agent/
 ├── mcp-server/
 │   ├── mcp_remote_server.py          # SSH sentinel MCP server
 │   ├── pyproject.toml                # Dependencies: mcp>=1.25
-│   ├── setup.sh                      # One-command install
+│   ├── setup.sh                      # One-command install for Claude Code / Codex
 │   └── tests/                        # Unit tests
 ├── reference/
 │   ├── context.template.md           # Template (distributed)
 │   └── context.local.md              # Personal config (gitignored, auto-generated)
 ```
 
-> **Note**: When cluster operations are needed, Claude Code automatically delegates to the `cluster-operator` subagent — no manual invocation required. This keeps your main conversation context clean.
+> **Note**: If you use Claude Code, cluster operations are automatically delegated to the `cluster-operator` subagent — no manual invocation required. This keeps your main conversation context clean.
 
 ## How the MCP Server Works
 

@@ -16,7 +16,7 @@
 
 ```
 本地机器（有网络）                       GPU 集群（无公网）
-├── Coding Agent (Claude Code)          └── /path/to/project/
+├── Coding Agent (Claude Code / Codex)  └── /path/to/project/
 ├── 原生工具 (Read/Edit/Write)              ├── 训练脚本
 │   每次操作 ~0.5ms                         ├── checkpoints
 ├── 代码同步 (git/rsync/自定义) ──────────> pull 变更
@@ -40,29 +40,63 @@
 
 ### 1. 安装 skill
 
+Claude Code：
+
 ```bash
 npx skills add https://github.com/jiahao-shao1/remote-cluster-agent
 ```
 
-### 2. 安装 MCP server
+Codex：
 
 ```bash
-bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh <名称> "<SSH命令>" <集群项目路径>
-
-# 示例：注册两个节点
-bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh train "ssh -p 2222 gpu-node" /home/user/project
-bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh eval  "ssh gpu-eval" /data/project
+mkdir -p ~/.codex/skills
+ln -s /path/to/remote-cluster-agent ~/.codex/skills/remote-cluster-agent
 ```
 
-前置条件：[uv](https://docs.astral.sh/uv/)、SSH 可访问集群、已安装 Claude Code。
+### 2. 安装 MCP server
 
-### 3. 重启 Claude Code
+脚本现在同时支持 Claude Code 和 Codex。默认会自动检测；如果两者都安装了，可以用 `--client` 显式指定。
 
-安装完成后重启 Claude Code 加载新的 MCP server。然后直接描述你想在集群上做什么。
+Claude Code:
+
+```bash
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client claude <名称> "<SSH命令>" <集群项目路径>
+
+# 示例：注册两个节点
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client claude train "ssh -p 2222 gpu-node" /home/user/project
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client claude eval  "ssh gpu-eval" /data/project
+```
+
+Codex:
+
+```bash
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client codex <名称> "<SSH命令>" <集群项目路径>
+
+# 示例：注册两个节点
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client codex train "ssh -p 2222 gpu-node" /home/user/project
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client codex eval  "ssh gpu-eval" /data/project
+```
+
+自动检测示例：
+
+```bash
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh train "ssh -p 2222 gpu-node" /home/user/project
+```
+
+前置条件：[uv](https://docs.astral.sh/uv/)、SSH 可访问集群、已安装 Claude Code 或 Codex CLI。
+
+### 3. 重启客户端
+
+安装完成后重启对应客户端以加载新的 MCP server：
+
+- Claude Code：重启 Claude Code
+- Codex：重启 Codex CLI 会话
+
+然后直接描述你想在集群上做什么。
 
 ### 4. 首次交互式配置
 
-首次使用时，Claude 会问你几个问题（SSH 端点、路径、同步方式、安全限制），自动生成你的个人配置 `reference/context.local.md`。这个文件被 gitignore，你的配置不会泄露。
+首次使用时，agent 会问你几个问题（SSH 端点、路径、同步方式、安全限制），自动生成你的个人配置 `reference/context.local.md`。这个文件被 gitignore，你的配置不会泄露。
 
 ## 文件结构
 
@@ -78,14 +112,14 @@ remote-cluster-agent/
 ├── mcp-server/
 │   ├── mcp_remote_server.py          # SSH 哨兵 MCP server
 │   ├── pyproject.toml                # 依赖：mcp>=1.25
-│   ├── setup.sh                      # 一键安装
+│   ├── setup.sh                      # Claude Code / Codex 一键安装
 │   └── tests/                        # 单元测试
 ├── reference/
 │   ├── context.template.md           # 模板（随 skill 分发）
 │   └── context.local.md              # 个人配置（gitignore，自动生成）
 ```
 
-> **说明**：当需要执行集群操作时，Claude Code 会自动将任务委托给 `cluster-operator` sub-agent，无需手动调用。这样可以保持主对话上下文干净。
+> **说明**：如果你使用 Claude Code，当需要执行集群操作时，它会自动将任务委托给 `cluster-operator` sub-agent，无需手动调用。这样可以保持主对话上下文干净。
 
 ## MCP Server 工作原理
 
