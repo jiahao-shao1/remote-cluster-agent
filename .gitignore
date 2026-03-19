@@ -4,4 +4,10 @@ reference/context.local.md
 # MCP server venv
 mcp-server/.venv/
 mcp-server/*.egg-info/
-mcp-server/__pycache__/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Lock file
+mcp-server/uv.lock
