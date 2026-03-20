@@ -21,6 +21,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CALLER_DIR="$(pwd)"
 
 # Detect mode: multi-node (JSON) or legacy single-node
 if echo "$1" | python3 -c "import json,sys; json.load(sys.stdin)" 2>/dev/null; then
@@ -73,6 +74,9 @@ fi
 PYTHON_PATH="$SCRIPT_DIR/.venv/bin/python"
 echo "    Python: $PYTHON_PATH"
 
+# Return to caller's directory so claude mcp add registers to the correct project
+cd "$CALLER_DIR"
+
 # ---- 2. Remove old per-node MCP servers ----
 echo "==> Cleaning up old MCP servers..."
 for old_name in $(claude mcp list 2>/dev/null | grep -oE 'cluster-\w+:' | tr -d ':'); do
@@ -82,9 +86,9 @@ done
 # Also remove unified "cluster" if re-running setup
 claude mcp remove "cluster" -s local 2>/dev/null || true
 
-# ---- 3. Register unified MCP server ----
+# ---- 3. Register unified MCP server (project-local scope) ----
 echo "==> Registering MCP server: cluster"
-claude mcp add "cluster" \
+claude mcp add "cluster" -s local \
     -e NODES="$NODES_JSON" \
     -e REMOTE_PROJECT_DIR="$REMOTE_DIR" \
     -e REMOTE_AGENT_PATH="$AGENT_PATH" \
