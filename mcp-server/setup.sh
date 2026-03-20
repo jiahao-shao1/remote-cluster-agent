@@ -258,6 +258,32 @@ remove_mcp() {
     fi
 }
 
+client_available() {
+    local client="$1"
+
+    command -v "$client" >/dev/null 2>&1
+}
+
+remove_mcp_known_clients() {
+    local name="$1"
+    local removed=0
+
+    if client_available claude; then
+        remove_mcp claude "$name"
+        removed=1
+    fi
+
+    if client_available codex; then
+        remove_mcp codex "$name"
+        removed=1
+    fi
+
+    if [ "$removed" -eq 0 ]; then
+        echo "Error: neither 'claude' nor 'codex' was found in PATH." >&2
+        exit 1
+    fi
+}
+
 create_mutagen_session() {
     local name="$1"
     local local_dir="$2"
@@ -451,7 +477,11 @@ if [ "$COMMAND" = "remove" ]; then
         CLIENT="${registry_client:-$CLIENT}"
     fi
 
-    remove_mcp "$CLIENT" "$NAME"
+    if [ -n "$CLIENT" ]; then
+        remove_mcp "$CLIENT" "$NAME"
+    else
+        remove_mcp_known_clients "$NAME"
+    fi
     remove_mutagen_session "$NAME"
     registry_remove "$NAME"
     echo "Removed link: $NAME"
@@ -510,6 +540,7 @@ fi
 PYTHON_PATH="$SCRIPT_DIR/.venv/bin/python"
 echo "    Python: $PYTHON_PATH"
 
+remove_mcp "$CLIENT" "$NAME"
 register_mcp "$CLIENT" "$NAME" "$SSH_CMD" "$REMOTE_DIR" "$PYTHON_PATH"
 create_mutagen_session "$NAME" "$LOCAL_DIR" "$MUTAGEN_ENDPOINT" "$MUTAGEN_MODE"
 registry_upsert "$NAME" "$CLIENT" "$LOCAL_DIR" "$SSH_CMD" "$REMOTE_DIR" "$MUTAGEN_ENDPOINT" "$MUTAGEN_MODE"
