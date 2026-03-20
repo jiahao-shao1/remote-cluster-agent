@@ -1,39 +1,52 @@
 # Remote Cluster Agent
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Version](https://img.shields.io/badge/version-0.2.0-blue)
 
 English | [中文](README.zh-CN.md)
 
-> Enable coding agents to iterate on air-gapped GPU clusters. Edit locally, execute remotely, sync your way.
+> A Claude Code skill for operating GPU clusters — edit code locally, run commands remotely with ~0.1s latency via persistent SSH agent connections.
 
-## Why This Exists
+## Install
 
-Many GPU clusters (private cloud, on-prem HPC, air-gapped environments) have no public internet. Running a full coding agent remotely is either impossible or painfully slow — remote file operations via MCP proxy are ~2000x slower than local ones.
+```bash
+npx skills add https://github.com/jiahao-shao1/remote-cluster-agent
+```
 
-This skill flips the model: **keep all read/write local, only send bash commands to the cluster**.
+Restart Claude Code after installing, then say "connect to cluster" to start. Claude will guide you through the setup automatically on first use (nodes, paths, MCP server installation).
 
-### Architecture
+## Architecture
+
+![Architecture](docs/architecture.png)
+
+> [Interactive version](docs/architecture.html) — click to toggle between Agent and Sentinel modes.
+
+**Two execution modes** — agent mode is ~10x faster, sentinel mode is the automatic fallback:
+
+| Mode | Latency | How it works |
+|------|---------|-------------|
+| **Agent mode** | ~0.1s | Persistent SSH connection → cluster-side `agent.py` → JSON-Lines protocol |
+| **Sentinel mode** | ~1.5s | Per-command SSH → sentinel pattern detection → `proc.kill()` |
 
 ```
-Local Machine (has internet)              GPU Cluster (no internet)
-├── Coding Agent (Claude Code)            └── /path/to/project/
-├── Native tools (Read/Edit/Write)            ├── training scripts
-│   ~0.5ms per operation                      ├── checkpoints
-├── code sync (git/rsync/your way) ────────> pull changes
-├── remote_bash MCP ───sentinel+kill───────> bash commands
-└── log sync (your way) <──────────────────── training outputs
+Local Machine                            GPU Cluster (no internet needed)
+├── Claude Code (Read/Edit/Write)        └── /path/to/project/
+│   ~0.5ms per operation                     ├── training scripts
+├── Mutagen real-time sync ◄──SSH──────────► code + logs
+├── remote_bash MCP ──────────SSH──────────► bash commands
+│   agent mode: ~0.1s                       └── agent.py (persistent)
+│   sentinel fallback: ~1.5s
+└── Read results locally (~20x faster)
 ```
 
 ### The Automation Loop
 
 ```
-Edit code (local) → Sync code → Run experiment (remote) → Sync logs → Read results (local) → repeat
+Edit code (local) → Mutagen syncs instantly → Run experiment (remote) → Logs sync back → Read results (local) → repeat
 ```
 
 - **Code editing**: Local native tools (fast, ~0.5ms)
-- **Code sync**: Any method your team already uses (git push/pull, rsync, shared filesystem, etc.)
-- **Remote execution**: `remote_bash` MCP tool (sentinel pattern handles non-closing SSH proxies)
-- **Log sync**: Any method your team already uses (object storage, rsync, shared filesystem, etc.)
+- **Code sync**: [Mutagen](https://mutagen.io) real-time bidirectional sync over SSH (see [MUTAGEN.md](MUTAGEN.md))
+- **Remote execution**: `remote_bash` MCP tool — single MCP server, multi-node routing via `node` parameter
 - **Reading results**: Local native Read tool (~20x faster than reading through remote MCP)
 
 ## Quick Start
@@ -47,49 +60,61 @@ npx skills add https://github.com/jiahao-shao1/remote-cluster-agent
 ### 2. Install the MCP server
 
 ```bash
-bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh <name> "<ssh_cmd>" <remote_project_dir>
+# Multi-node (recommended)
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh \
+  '{"train":"ssh -p 2222 gpu-node","eval":"ssh gpu-eval"}' \
+  /home/user/project
 
-# Example: register two containers
-bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh train "ssh -p 2222 gpu-node" /home/user/project
-bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh eval  "ssh gpu-eval" /data/project
+# Single node
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh \
+  train "ssh -p 2222 gpu-node" /home/user/project
 ```
 
 Prerequisites: [uv](https://docs.astral.sh/uv/), SSH access to cluster, Claude Code installed.
 
-### 3. Restart Claude Code
+### 3. Deploy the cluster-side agent (optional, ~10x faster)
+
+```bash
+scp .agents/skills/remote-cluster-agent/cluster-agent/agent.py <host>:~/.mcp-agent/agent.py
+```
+
+Or let Claude do it after restart — just say "deploy agent".
+
+Without the agent, everything still works via sentinel mode (~1.5s/command).
+
+### 4. Restart Claude Code
 
 After installing, restart Claude Code to load the new MCP server. Then just describe what you want to do on the cluster.
 
-### 4. First-time interactive setup
+### 5. Set up Mutagen sync
 
-On first use, Claude will ask you a few questions (SSH endpoints, paths, sync methods, safety rules) and generate your personal `reference/context.local.md`. This file is gitignored — your config stays private.
-
-## File Structure
-
-```
-remote-cluster-agent/
-├── SKILL.md                          # Skill instructions (generic, no personal info)
-├── README.md                         # This file
-├── README.zh-CN.md                   # Chinese version
-├── .gitignore                        # Excludes context.local.md and .venv
-├── .claude/
-│   └── agents/
-│       └── cluster-operator.md       # Subagent for cluster ops (auto-dispatched)
-├── mcp-server/
-│   ├── mcp_remote_server.py          # SSH sentinel MCP server
-│   ├── pyproject.toml                # Dependencies: mcp>=1.25
-│   ├── setup.sh                      # One-command install
-│   └── tests/                        # Unit tests
-├── reference/
-│   ├── context.template.md           # Template (distributed)
-│   └── context.local.md              # Personal config (gitignored, auto-generated)
+```bash
+bash .agents/skills/remote-cluster-agent/mutagen-setup.sh gpu-node ~/repo/my_project /home/user/my_project
 ```
 
-> **Note**: When cluster operations are needed, Claude Code automatically delegates to the `cluster-operator` subagent — no manual invocation required. This keeps your main conversation context clean.
+See [MUTAGEN.md](MUTAGEN.md) for details. Mutagen works entirely over SSH — no public internet required on the cluster.
 
-## How the MCP Server Works
+### 6. First-time interactive setup
 
-Some SSH proxies / jump hosts don't close connections after commands finish. The MCP server works around this:
+On first use, Claude will ask you a few questions (SSH endpoints, paths, safety rules) and generate your personal `reference/context.local.md`. This file is gitignored — your config stays private.
+
+## How It Works
+
+### Agent Mode (fast, ~0.1s)
+
+```
+MCP Server                          Cluster Node
+┌──────────┐   SSH long connection  ┌────────────┐
+│ AgentConn│── stdin: JSON req ───→│ agent.py   │
+│ Pool     │←─ stdout: JSON resp ──│ subprocess │
+│ (per     │                       │ .run(cmd)  │
+│  node)   │                       └────────────┘
+└──────────┘
+```
+
+One SSH connection per node, kept alive with `ServerAliveInterval`. Commands sent as JSON-Lines, results returned immediately.
+
+### Sentinel Mode (fallback, ~1.5s)
 
 ```
 remote_bash("nvidia-smi")
@@ -97,31 +122,48 @@ remote_bash("nvidia-smi")
 → ssh -tt gpu-node 'nvidia-smi 2>&1; echo "___MCP_EXIT_${?}___"'
 
 stdout:
-  Thu Mar 19 ...
   | NVIDIA H100 ...
   ___MCP_EXIT_0___     ← sentinel detected
 
-→ proc.kill()          ← force-kill SSH process
+→ proc.kill()          ← force-kill SSH (proxy won't close it)
 → return clean output
 ```
 
-Sentinel + `proc.kill()` = no hanging, fully automatic.
+Used automatically when the agent is not available.
 
-## Adapting to Your Cluster
+## File Structure
 
-This skill is designed to be cluster-agnostic. To adapt it to your environment:
+```
+remote-cluster-agent/
+├── SKILL.md                          # Skill instructions for Claude
+├── cluster-agent/
+│   └── agent.py                      # Cluster-side agent (zero deps, ~100 lines)
+├── mcp-server/
+│   ├── mcp_remote_server.py          # MCP server with agent mode + sentinel fallback
+│   ├── pyproject.toml                # Dependencies: mcp>=1.25
+│   └── setup.sh                      # One-command install (supports multi-node JSON)
+├── mutagen-setup.sh                  # Mutagen file sync setup script
+├── MUTAGEN.md                        # Mutagen sync guide
+├── reference/
+│   ├── context.template.md           # Configuration template
+│   └── context.local.md              # Your config (gitignored, auto-generated)
+└── VERSION
+```
 
-| What | How |
-|------|-----|
-| SSH access | Any `ssh` command that reaches your cluster (direct, jump host, tunnel, proxy) |
-| Code sync | Configure your preferred method (git, rsync, shared NFS, etc.) in `context.local.md` |
-| Log/output sync | Configure your preferred method (object storage, rsync, scp, etc.) in `context.local.md` |
-| Safety rules | Define protected paths and restrictions during interactive setup |
-| GPU management | Optionally configure GPU idle-prevention scripts |
+## Configuration
+
+The skill generates a `reference/context.local.md` through interactive setup on first use, containing:
+- Cluster nodes (names, SSH commands, purposes)
+- Project paths and directory structure
+- Shared storage safety rules
+- GPU management scripts
+- Mutagen sync sessions
 
 ## Acknowledgements
 
 Heavily inspired by [claude-code-local-for-vscode](https://github.com/justimyhxu/claude-code-local-for-vscode).
+
+Thanks to [@cherubicXN](https://github.com/cherubicXN) for the implementation of Mutagen-based local-cluster real-time sync.
 
 ## License
 

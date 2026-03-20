@@ -1,11 +1,12 @@
 ---
 name: remote-cluster-agent
-description: 远程 GPU 集群操作。当用户提到集群、远程执行、GPU、训练、同步代码时使用。触发词包括但不限于："连集群"、"同步代码"、"GPU 占用"、"集群上跑"、"remote bash"、"在服务器上"、"跑训练"、"看日志"、"tail log"。即使用户没有明确提到集群，只要任务涉及远程执行或训练相关操作，也应该触发此 skill。
+description: 远程 GPU 集群操作。当用户提到集群、远程执行、GPU、训练、同步代码时使用。触发词包括但不限于："连集群"、"同步代码"、"GPU 占用"、"集群上跑"、"remote bash"、"在服务器上"、"跑训练"、"看日志"、"tail log"、"mutagen"。即使用户没有明确提到集群，只要任务涉及远程执行或训练相关操作，也应该触发此 skill。
 ---
 
 # Remote Cluster Agent
 
-通过 MCP server 提供 `remote_bash` 工具，在远程 GPU 集群上执行命令。
+通过单个 MCP server 提供 `remote_bash` 工具（带 `node` 参数路由），在远程 GPU 集群上执行命令。
+使用持久 SSH 长连接 + 集群端 Agent 模式，命令延迟 ~0.1s（旧 sentinel 模式 ~1.5s，约 10x 加速）。
 
 ## Step 0: 检查配置
 
@@ -42,51 +43,96 @@ description: 远程 GPU 集群操作。当用户提到集群、远程执行、GP
 
 如果用户选了 2 个以上节点，追加 1 轮问后续节点信息（同样用 preview 格式）。
 
-### 第 2 轮：安全限制 + 同步方式 + 补充（2-3 个问题）
+### 第 2 轮：安全限制 + Mutagen + 补充（2-3 个问题）
 
 1. **共享存储安全限制**
    - header: "安全限制"
    - 选项: "有受保护的共享路径" / "没有特殊限制" / "自定义"
    - 如果有，追问具体路径和限制规则
 
-2. **日志/输出同步方式**
-   - header: "日志同步"
-   - 选项: "有同步脚本（用于同步训练输出到本地）" / "不需要同步（直接用 remote_bash 读取）"
-   - 如果有，追问：上传脚本路径（集群上）、下载脚本路径（本地）、本地输出目录
+2. **Mutagen 文件同步**
+   - header: "代码同步"
+   - 选项: "已配置 Mutagen（实时同步）" / "需要帮助配置 Mutagen" / "暂不配置"
+   - 如果需要帮助，引导用户参考 `MUTAGEN.md` 进行配置
 
 3. **（条件）GPU 脚本路径**——仅当上轮选了"需要"时才问
 
 ### 生成配置 & 安装
 
-1. 参考 `reference/context.template.md` 格式，生成 `reference/context.local.md`
-2. 对每个节点运行 MCP server 安装：
-   ```bash
-   bash <skill_dir>/mcp-server/setup.sh <节点名> "<SSH命令>" <项目路径>
+根据交互收集的信息，执行以下步骤：
+
+**Step 1: 生成配置文件**
+
+参考 `reference/context.template.md` 格式，用用户回答填充，生成 `reference/context.local.md`。
+注意在节点表中填入实际的节点名称和 SSH 命令。
+
+**Step 2: 构建 NODES JSON**
+
+将所有节点的名称和 SSH 命令组成 JSON。例如用户输入了两个节点：
+```
+NODES='{"train":"ssh -p 2222 gpu-node","eval":"ssh gpu-eval"}'
+```
+
+**Step 3: 安装 MCP server**
+
+```bash
+bash <skill_dir>/mcp-server/setup.sh "$NODES" <项目路径>
+```
+
+如果用户的 agent 路径不是默认的 `~/.mcp-agent/agent.py`，追加参数：
+```bash
+bash <skill_dir>/mcp-server/setup.sh "$NODES" <项目路径> <agent_path>
+```
+
+**Step 4: 提示重启 + 部署 Agent**
+
+告诉用户：
+1. 重启 Claude Code 以加载新的 MCP server
+2. 重启后，运行以下命令部署集群端 Agent（只需做一次）：
    ```
-3. 提示用户重启 Claude Code 以加载新的 MCP server
+   请说 "部署集群 Agent" 或 "deploy agent"，我会通过 remote_bash 自动完成
+   ```
+
+**Step 5: Agent 部署**（用户重启后触发）
+
+当用户重启回来并请求部署 Agent 时：
+1. 读取 `<skill_dir>/cluster-agent/agent.py` 的内容
+2. 通过 `remote_bash` 写入集群：
+   ```bash
+   mkdir -p ~/.mcp-agent
+   cat > ~/.mcp-agent/agent.py << 'AGENT_EOF'
+   ... (agent.py 的完整内容)
+   AGENT_EOF
+   chmod +x ~/.mcp-agent/agent.py
+   python3 -c "import ast; ast.parse(open(os.path.expanduser('~/.mcp-agent/agent.py')).read()); print('syntax OK')"
+   ```
+3. 验证 Agent 可用：
+   ```bash
+   echo '{"type":"ping"}' | python3 ~/.mcp-agent/agent.py
+   ```
+4. 提示用户再次重启 Claude Code，Agent 模式将自动启用
+
+> 如果 Step 5 跳过，MCP server 仍然可用（自动降级为 sentinel 模式，~1.5s/命令）。
+> Agent 部署后无需再次重启——下次 remote_bash 调用时会自动连接 Agent。
 
 ## 架构原则
 
-- **代码编辑在本地**：Coding Agent 原生工具（~0.5ms），远程 MCP 代理文件操作慢 ~2000x
-- **代码同步用团队已有方式**：git push/pull、rsync、共享文件系统等
-- **远程只跑命令**：通过 `remote_bash` 执行训练等 bash 操作
-- **读日志/结果在本地**：通过团队已有的同步方式拉到本地，然后用原生 Read 工具读取（比 remote_bash cat 快 ~20x）
+- **代码编辑在本地**：Claude Code 原生工具（~0.5ms），远程 MCP 代理文件操作慢 ~2000x
+- **远程只跑命令**：通过 `mcp__cluster__remote_bash(node="train")` 执行
+- **单个 MCP 管所有节点**：`node` 参数路由（train/eval/...），扩展到 N 节点不增加 context 占用
+- **Agent 模式优先**：集群上的 `agent.py` 通过 SSH 长连接通信，~0.1s/命令；不可用时自动降级为 sentinel 模式
+- **代码同步用 Mutagen**：通过 SSH 隧道实时双向同步，不需要集群有公网。详见 `MUTAGEN.md`
+- **读日志/结果在本地**：Mutagen 实时同步到本地后用原生 Read 工具读取（比 remote_bash cat 快 ~20x）
 
 ## 核心操作
 
 以下操作中的路径均从 `reference/context.local.md` 读取，不要硬编码。
 
-### 同步代码
+### 代码同步
 
-```bash
-# 本地（示例：git 方式）
-git add <files> && git commit -m "..." && git push
+所有环境通过 Mutagen 实时同步，保存即生效，无需手动操作。
 
-# 集群 (remote_bash)
-cd <project_dir> && git pull
-```
-
-验证：对比本地和集群的 `git log --oneline -1`。
+如果 Mutagen 尚未配置，引导用户参考 `MUTAGEN.md` 进行配置。Mutagen 通过 SSH 隧道工作，集群不需要公网。
 
 ### GPU 占用管理（如果配置了）
 
@@ -118,24 +164,14 @@ tail -30 <log_path>
 bash <start_gpu_script> 2>/dev/null || true
 ```
 
-### 同步输出到本地（读日志/结果时优先使用）
+### 读取日志/结果
 
-当需要读取集群上的日志、评估结果等文件时，优先通过同步方式拉到本地再用原生 Read 工具读取，速度快得多。
+Mutagen 实时同步意味着集群上的日志/输出文件会自动出现在本地对应目录。直接用本地 Read 工具读取，无需额外同步步骤。
 
-路径和脚本从 `context.local.md` 的同步配置读取。
-
+如果输出文件不在 Mutagen 同步范围内（如输出到了项目目录外），用 `remote_bash` 读取：
 ```bash
-# Step 1: 集群 → 中转存储（remote_bash 执行）
-cd <project_dir> && bash <upload_script> [subdir]
-
-# Step 2: 中转存储 → 本地（本地 Bash 执行）
-bash <download_script> [subdir]
-
-# Step 3: 本地 Read 工具读取
-# 文件现在在 <local_outputs_dir>/ 下，直接用 Read 工具
+tail -100 <log_path>
 ```
-
-**注意**：默认排除 checkpoint 文件（*.pt, *.bin, *.safetensors, *.pth），避免撑爆本地存储。只在用户明确要求时才同步大文件。
 
 ## 安全边界
 
