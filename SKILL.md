@@ -121,7 +121,7 @@ bash <skill_dir>/mcp-server/setup.sh "$NODES" <项目路径> <agent_path>
 - **远程只跑命令**：通过 `mcp__cluster__remote_bash(node="train")` 执行
 - **单个 MCP 管所有节点**：`node` 参数路由（train/eval/...），扩展到 N 节点不增加 context 占用
 - **Agent 模式优先**：集群上的 `agent.py` 通过 SSH 长连接通信，~0.1s/命令；不可用时自动降级为 sentinel 模式
-- **代码同步用 Mutagen**：通过 SSH 隧道实时双向同步，不需要集群有公网。详见 `MUTAGEN.md`
+- **代码同步用 Mutagen**：推荐 one-way-safe 模式（本地→集群），通过 SSH 隧道同步，不需要集群有公网。详见 `MUTAGEN.md`
 - **读日志/结果在本地**：Mutagen 实时同步到本地后用原生 Read 工具读取（比 remote_bash cat 快 ~20x）
 
 ## 核心操作
@@ -166,7 +166,7 @@ bash <start_gpu_script> 2>/dev/null || true
 
 ### 读取日志/结果
 
-Mutagen 实时同步意味着集群上的日志/输出文件会自动出现在本地对应目录。直接用本地 Read 工具读取，无需额外同步步骤。
+推荐配置 Mutagen one-way-safe session 将集群 outputs 自动同步到本地（排除 checkpoint 大文件），同步后直接用 Read 工具读取本地目录。
 
 如果输出文件不在 Mutagen 同步范围内（如输出到了项目目录外），用 `remote_bash` 读取：
 ```bash

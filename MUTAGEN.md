@@ -1,6 +1,8 @@
 # Mutagen File Sync
 
-Real-time bidirectional file sync between your local machine and remote GPU cluster, using [Mutagen](https://mutagen.io). Works entirely over SSH — no public internet required on the cluster.
+Real-time file sync between your local machine and remote GPU cluster, using [Mutagen](https://mutagen.io). Works entirely over SSH — no public internet required on the cluster.
+
+**Recommended mode**: `one-way-safe` (unidirectional sync). Use local→cluster for code, cluster→local for outputs. Avoids issues with deletions not propagating in bidirectional mode.
 
 ## Why Mutagen?
 
@@ -149,3 +151,57 @@ mutagen-setup.sh
 ```
 
 The key insight: Mutagen's **long-lived agent communication** (stdin/stdout pipes) works perfectly through SSH proxies — the persistent connection is actually desired. Only the **installation** (SCP) and **stderr pollution** needed workarounds.
+
+## Troubleshooting
+
+### Daemon stuck (connection timed out)
+
+When `mutagen sync list` reports "connection timed out (is the daemon running?)":
+
+```bash
+# 1. Kill all mutagen processes
+pkill -9 mutagen
+
+# 2. Clean up socket and lock files (critical step!)
+rm -f ~/.mutagen/daemon/daemon.sock ~/.mutagen/daemon/daemon.lock
+
+# 3. Restart daemon
+mutagen daemon start
+
+# 4. Verify
+mutagen sync list
+```
+
+**Root cause**: The daemon communicates via Unix socket with a 500ms connection timeout. When the process hangs, stale socket/lock files prevent new daemons from binding. Killing the process alone without cleaning these files causes repeated startup failures.
+
+### Changing sync mode
+
+Mutagen doesn't support in-place mode changes. You need to delete and recreate the session:
+
+```bash
+# 1. Record current config (especially the ignore list)
+mutagen sync list <session_name> --long
+
+# 2. Delete old session
+mutagen sync terminate <session_name>
+
+# 3. Recreate with same name and ignores
+mutagen sync create --name=<session_name> --mode=one-way-safe \
+  --ignore="*.pt" --ignore="*.pth" ... \
+  <alpha_url> <beta_url>
+```
+
+### Resolving one-way-safe conflicts
+
+In `one-way-safe` mode, conflicts arise when the beta side already has files that differ from alpha. To resolve:
+
+```bash
+# 1. Delete conflicting files on the beta side (let alpha's version sync over)
+rm <beta_side_conflict_files>
+
+# 2. Reset session to clear conflict records
+mutagen sync reset <session_name>
+
+# 3. Flush to trigger sync
+mutagen sync flush <session_name>
+```
