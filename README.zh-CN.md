@@ -12,7 +12,7 @@
 npx skills add https://github.com/jiahao-shao1/remote-cluster-agent
 ```
 
-安装后重启 Claude Code，然后说"连集群"开始使用。Claude 会在首次使用时引导你完成配置（节点、路径、MCP server 安装）。
+安装后重启你的 agent，然后说"连集群"开始使用。Agent 会在首次使用时引导你完成配置（节点、路径、MCP server 安装）。
 
 ## 架构
 
@@ -29,7 +29,7 @@ npx skills add https://github.com/jiahao-shao1/remote-cluster-agent
 
 ```
 本地机器                                  GPU 集群（不需要公网）
-├── Claude Code (Read/Edit/Write)        └── /path/to/project/
+├── Claude Code / Codex (Read/Edit/Write)└── /path/to/project/
 │   每次操作 ~0.5ms                          ├── 训练脚本
 ├── Mutagen 实时同步 ◄───SSH────────────► 代码 + 日志
 ├── remote_bash MCP ─────SSH────────────► bash 命令
@@ -53,24 +53,50 @@ npx skills add https://github.com/jiahao-shao1/remote-cluster-agent
 
 ### 1. 安装 skill
 
+Claude Code：
+
 ```bash
 npx skills add https://github.com/jiahao-shao1/remote-cluster-agent
 ```
 
-### 2. 安装 MCP server
+Codex：
 
 ```bash
-# 多节点（推荐）
-bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh \
-  '{"train":"ssh -p 2222 gpu-node","eval":"ssh gpu-eval"}' \
-  /home/user/project
-
-# 单节点
-bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh \
-  train "ssh -p 2222 gpu-node" /home/user/project
+mkdir -p ~/.codex/skills
+ln -s /path/to/remote-cluster-agent ~/.codex/skills/remote-cluster-agent
 ```
 
-前置条件：[uv](https://docs.astral.sh/uv/)、SSH 可访问集群、已安装 Claude Code。
+### 2. 安装 MCP server
+
+脚本现在同时支持 Claude Code 和 Codex。默认会自动检测；如果两者都安装了，可以用 `--client` 显式指定。
+
+Claude Code:
+
+```bash
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client claude <名称> "<SSH命令>" <集群项目路径>
+
+# 示例：注册两个节点
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client claude train "ssh -p 2222 gpu-node" /home/user/project
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client claude eval  "ssh gpu-eval" /data/project
+```
+
+Codex:
+
+```bash
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client codex <名称> "<SSH命令>" <集群项目路径>
+
+# 示例：注册两个节点
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client codex train "ssh -p 2222 gpu-node" /home/user/project
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh --client codex eval  "ssh gpu-eval" /data/project
+```
+
+自动检测示例：
+
+```bash
+bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh train "ssh -p 2222 gpu-node" /home/user/project
+```
+
+前置条件：[uv](https://docs.astral.sh/uv/)、SSH 可访问集群、已安装 Claude Code 或 Codex CLI。
 
 ### 3. 部署集群端 Agent（可选，快 ~10x）
 
@@ -78,13 +104,18 @@ bash .agents/skills/remote-cluster-agent/mcp-server/setup.sh \
 scp .agents/skills/remote-cluster-agent/cluster-agent/agent.py <host>:~/.mcp-agent/agent.py
 ```
 
-或者重启后让 Claude 来做——直接说"部署 Agent"。
+或者重启后让 agent 来做——直接说"部署 Agent"。
 
 不部署 Agent 也能用，只是走 Sentinel 模式（~1.5s/命令）。
 
-### 4. 重启 Claude Code
+### 4. 重启客户端
 
-安装完成后重启 Claude Code 加载新的 MCP server。然后直接描述你想在集群上做什么。
+安装完成后重启对应客户端以加载新的 MCP server：
+
+- Claude Code：重启 Claude Code
+- Codex：重启 Codex CLI 会话
+
+然后直接描述你想在集群上做什么。
 
 ### 5. 配置 Mutagen 同步
 
@@ -96,7 +127,7 @@ bash .agents/skills/remote-cluster-agent/mutagen-setup.sh gpu-node ~/repo/my_pro
 
 ### 6. 首次交互式配置
 
-首次使用时，Claude 会问你几个问题（SSH 端点、路径、安全限制），自动生成你的个人配置 `reference/context.local.md`。这个文件被 gitignore，你的配置不会泄露。
+首次使用时，agent 会问你几个问题（SSH 端点、路径、同步方式、安全限制），自动生成你的个人配置 `reference/context.local.md`。这个文件被 gitignore，你的配置不会泄露。
 
 ## 工作原理
 
@@ -135,13 +166,17 @@ Agent 不可用时自动使用此模式。
 
 ```
 remote-cluster-agent/
-├── SKILL.md                          # Skill 指令（Claude 读取）
+├── SKILL.md                          # Skill 指令
+├── README.md                         # 英文说明
+├── README.zh-CN.md                   # 本文件
+├── .gitignore                        # 排除 context.local.md 和 .venv
 ├── cluster-agent/
 │   └── agent.py                      # 集群端 Agent（零依赖，~100 行）
 ├── mcp-server/
 │   ├── mcp_remote_server.py          # MCP server（Agent 模式 + Sentinel 回退）
 │   ├── pyproject.toml                # 依赖：mcp>=1.25
-│   └── setup.sh                      # 一键安装（支持多节点 JSON）
+│   ├── setup.sh                      # Claude Code / Codex 一键安装
+│   └── tests/                        # 单元测试
 ├── mutagen-setup.sh                  # Mutagen 文件同步配置脚本
 ├── MUTAGEN.md                        # Mutagen 同步指南
 ├── reference/
